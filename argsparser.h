@@ -91,7 +91,7 @@ namespace args {
 					if (first) first = false;
 					else nmz.append(", ");
 
-					if (nmz.length() == 1)
+					if (name.length() == 1)
 						nmz.append("-");
 					else
 						nmz.append("--");
