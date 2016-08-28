@@ -3,6 +3,8 @@
 
 #pragma once
 
+#define HAS_FMTSTR 1
+
 #include <string>
 #include <type_traits>
 
@@ -73,6 +75,11 @@ namespace fmt {
 				if (*from == '$') {
 					size_t ndx = 0;
 					++from;
+					if (from != to && *from == '$') {
+						out.push_back(*from++);
+						continue;
+					}
+
 					while (from != to) {
 						bool do_break = false;
 
@@ -97,12 +104,6 @@ namespace fmt {
 				out.push_back(*from++);
 			}
 			return out;
-		}
-
-		template <typename It>
-		std::string str(It from, It end, const std::tuple<>& args)
-		{
-			return { from, end };
 		}
 	}
 

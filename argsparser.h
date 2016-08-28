@@ -22,6 +22,19 @@
 #	define _fileno(OBJ) fileno(OBJ)
 #endif
 
+#if defined(__has_include)
+#	if __has_include(<libintl.h>)
+#		include <libintl.h>
+#		define HAS_GETTEXT
+#	endif
+#endif
+
+#if defined(__has_include) && defined(HAS_GETTEXT)
+#	if __has_include("fmtstr.h")
+#		include "fmtstr.h"
+#	endif
+#endif
+
 #include "callable.h"
 
 namespace args {
@@ -57,6 +70,40 @@ namespace args {
 			return "<unrecognized string>";
 		}
 	};
+
+#ifdef HAS_FMTSTR
+	template <typename Final>
+	class translator_base {
+	public:
+		template <typename... Args>
+		std::string operator()(lng id, Args&&... args)
+		{
+			auto& loader = *static_cast<Final*>(this);
+			return fmt::str(loader.load(id), std::forward<Args>(args)...);
+		}
+	};
+#endif
+
+#ifdef HAS_GETTEXT
+	class gettext_translator : public translator_base<gettext_translator> {
+	public:
+		const char* load(lng id)
+		{
+			switch (id) {
+			case lng::usage:            return gettext("usage: ");
+			case lng::def_meta:		    return gettext("ARG");
+			case lng::positionals: 	    return gettext("positional arguments");
+			case lng::optionals:	    return gettext("optional arguments");
+			case lng::help_description: return gettext("show this help message and exit");
+			case lng::unrecognized:	    return gettext("unrecognized argument: $1");
+			case lng::needs_param:	    return gettext("argument $1: expected one argument");
+			case lng::requires:		    return gettext("argument $1 is required");
+			case lng::error_msg:	    return gettext("$1: error: $2");
+			}
+			return "<unrecognized string>";
+		}
+	};
+#endif
 
 	using translator = ARGS_TRANSLATOR;
 
