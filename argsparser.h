@@ -3,6 +3,10 @@
 
 #pragma once
 
+#ifndef ARGS_TRANSLATOR
+#define ARGS_TRANSLATOR args::null_translator
+#endif
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -23,6 +27,39 @@
 namespace args {
 	class parser;
 
+	enum lng {
+		usage,
+		def_meta,
+		positionals,
+		optionals,
+		help_description,
+		unrecognized,
+		needs_param,
+		requires,
+		error_msg
+	};
+
+	class null_translator {
+	public:
+		std::string operator()(lng id, const std::string& arg1 = { }, const std::string& arg2 = { })
+		{
+			switch (id) {
+			case lng::usage:            return "usage: ";
+			case lng::def_meta:		    return "ARG";
+			case lng::positionals: 	    return "positional arguments";
+			case lng::optionals:	    return "optional arguments";
+			case lng::help_description: return "show this help message and exit";
+			case lng::unrecognized:	    return "unrecognized argument: " + arg1;
+			case lng::needs_param:	    return "argument " + arg1 + ": expected one argument";
+			case lng::requires:		    return "argument " + arg1 + " is required";
+			case lng::error_msg:	    return arg1 + ": error: " + arg2;
+			}
+			return "<unrecognized string>";
+		}
+	};
+
+	using translator = ARGS_TRANSLATOR;
+
 	namespace actions {
 		struct action {
 			virtual ~action() {}
@@ -36,18 +73,18 @@ namespace args {
 			virtual bool visited() const = 0;
 			virtual void meta(const std::string& s) = 0;
 			virtual const std::string& meta() const = 0;
-			virtual const char* c_meta() const = 0;
+			virtual std::string meta_name(translator&) const = 0;
 			virtual void help(const std::string& s) = 0;
 			virtual const std::string& help() const = 0;
 			virtual bool is(const std::string& name) const = 0;
 			virtual bool is(char name) const = 0;
 			virtual const std::vector<std::string>& names() const = 0;
 
-			void append_short_help(std::string& s) const
+			void append_short_help(translator& _, std::string& s) const
 			{
 				std::string aname;
 				if (names().empty()) {
-					aname = c_meta();
+					aname = meta_name(_);
 				} else {
 					aname.push_back('-');
 					auto& name = names().front();
@@ -57,7 +94,7 @@ namespace args {
 
 					if (needs_arg()) {
 						aname.push_back(' ');
-						aname.append(c_meta());
+						aname.append(meta_name(_));
 					}
 				}
 
@@ -83,7 +120,7 @@ namespace args {
 				}
 			}
 
-			std::string help_name() const
+			std::string help_name(translator& _) const
 			{
 				std::string nmz;
 				bool first = true;
@@ -99,11 +136,11 @@ namespace args {
 				}
 
 				if (nmz.empty())
-					return c_meta();
+					return meta_name(_);
 
 				if (needs_arg()) {
 					nmz.push_back(' ');
-					nmz.append(c_meta());
+					nmz.append(meta_name(_));
 				}
 
 				return nmz;
@@ -145,7 +182,7 @@ namespace args {
 			bool visited() const override { return visited_; }
 			void meta(const std::string& s) override { meta_ = s; }
 			const std::string& meta() const override { return meta_; }
-			const char* c_meta() const override { return meta_.empty() ? "ARG" : meta_.c_str(); }
+			std::string meta_name(translator& _) const override { return meta_.empty() ? _(lng::def_meta) : meta_.c_str(); }
 			void help(const std::string& s) override { help_ = s; }
 			const std::string& help() const override { return help_; }
 
@@ -176,12 +213,13 @@ namespace args {
 		};
 
 		class builder {
-			friend class parser;
+			friend class ::args::parser;
 
 			actions::action* ptr;
 			builder(actions::action* ptr) : ptr(ptr) { }
 			builder(const builder&);
 		public:
+			builder(builder&&) = default;
 			builder& meta(const std::string& name)
 			{
 				ptr->meta(name);
@@ -500,14 +538,14 @@ namespace args {
 
 	template <typename output>
 	struct printer_base : printer_base_impl<output> {
-		using printer_base_impl::printer_base_impl;
+		using printer_base_impl<output>::printer_base_impl;
 	};
 
 	template <>
 	struct printer_base<file_printer> : printer_base_impl<file_printer> {
-		using printer_base_impl::printer_base_impl;
-		using printer_base_impl::format_paragraph;
-		using printer_base_impl::format_list;
+		using printer_base_impl<file_printer>::printer_base_impl;
+		using printer_base_impl<file_printer>::format_paragraph;
+		using printer_base_impl<file_printer>::format_list;
 		inline void format_paragraph(const std::string& text, size_t indent)
 		{
 			format_paragraph(text, indent, width());
@@ -527,6 +565,7 @@ namespace args {
 		std::string prog_;
 		std::string usage_;
 		bool provide_help_ = true;
+		translator m_tr;
 
 #ifdef _WIN32
 		static constexpr char DIRSEP = '\\';
@@ -572,7 +611,7 @@ namespace args {
 
 		static std::string expand(char c)
 		{
-			char buff[] = { c, 0 };
+			char buff[] = { '-', c, 0 };
 			return buff;
 		}
 
@@ -588,7 +627,7 @@ namespace args {
 				if (action->needs_arg()) {
 					++i;
 					if (i >= args_.size())
-						error("argument --" + name + ": expected one argument");
+						error(m_tr(lng::needs_param, "--" + name));
 
 					action->visit(*this, args_[i]);
 				} else
@@ -597,7 +636,7 @@ namespace args {
 				return;
 			}
 
-			error("unrecognized argument: --" + name);
+			error(m_tr(lng::unrecognized, "--" + name));
 		}
 
 		void parse_short(const std::string& name, size_t& arg)
@@ -622,7 +661,7 @@ namespace args {
 						else {
 							++arg;
 							if (arg >= args_.size())
-								error("argument -" + expand(c) + ": expected one argument");
+								error(m_tr(lng::needs_param, expand(c)));
 
 							param = args_[arg];
 						}
@@ -638,7 +677,7 @@ namespace args {
 				}
 
 				if (!found)
-					error("unrecognized argument: -" + expand(c));
+					error(m_tr(lng::unrecognized, expand(c)));
 			}
 		}
 
@@ -652,17 +691,17 @@ namespace args {
 				return;
 			}
 
-			error("unrecognized argument: " + value);
+			error(m_tr(lng::unrecognized, value));
 		}
 
 		template <typename T, typename... Args>
-		actions::action* add(Args&&... args)
+		actions::builder add(Args&&... args)
 		{
 			actions_.push_back(std::make_unique<T>(std::forward<Args>(args)...));
 			return actions_.back().get();
 		}
 	public:
-		parser(const std::string& description, int argc, char* argv[]) : description_(description), prog_{ program_name(argv[0]) }
+		parser(const std::string& description, int argc, char* argv[], translator&& tr = { }) : description_(description), prog_ { program_name(argv[0]) }, m_tr { std::move(tr) }
 		{
 			args_.reserve(argc - 1);
 			for (int i = 1; i < argc; ++i)
@@ -720,19 +759,19 @@ namespace args {
 				if (action->required() && !action->visited()) {
 					std::string arg;
 					if (action->names().empty()) {
-						arg = action->c_meta();
+						arg = action->meta_name(m_tr);
 					} else {
 						auto& name = action->names().front();
 						arg = name.length() == 1 ? "-" + name : "--" + name;
 					}
-					error("argument " + arg + " is required");
+					error(m_tr(lng::requires, arg));
 				}
 			}
 		}
 
 		void short_help(FILE* out = stdout)
 		{
-			std::string shrt { "usage: " };
+			std::string shrt { m_tr(lng::usage) };
 			shrt.append(prog_);
 
 			if (!usage_.empty()) {
@@ -743,7 +782,7 @@ namespace args {
 					shrt.append(" [-h]");
 
 				for (auto& action : actions_)
-					action->append_short_help(shrt);
+					action->append_short_help(m_tr, shrt);
 			}
 
 			printer{ out }.format_paragraph(shrt, 7);
@@ -766,17 +805,17 @@ namespace args {
 
 			size_t args_id = 0;
 			if (positionals)
-				make_title(info[args_id++], "positional arguments", positionals);
+				make_title(info[args_id++], m_tr(lng::positionals), positionals);
 
 			if (arguments) {
-				auto& args = make_title(info[args_id], "optional arguments", arguments);
+				auto& args = make_title(info[args_id], m_tr(lng::optionals), arguments);
 				if (provide_help_)
-					args.items.push_back(std::make_pair("-h, --help", "show this help message and exit"));
+					args.items.push_back(std::make_pair("-h, --help", m_tr(lng::help_description)));
 			}
 
 			for (auto& action : actions_) {
 				info[action->names().empty() ? 0 : args_id].items
-					.push_back(std::make_pair(action->help_name(), action->help()));
+					.push_back(std::make_pair(action->help_name(m_tr), action->help()));
 			}
 
 			printer { stdout }.format_list(info);
@@ -784,10 +823,10 @@ namespace args {
 			std::exit(0);
 		}
 
-		[[noreturn]] void error(const std::string& msg)
+		[[noreturn]] void error(std::string msg)
 		{
 			short_help(stderr);
-			printer { stderr }.format_paragraph(prog_ + ": error: " + msg, 0);
+			printer { stderr }.format_paragraph(m_tr(lng::error_msg, prog_, std::move(msg)), 0);
 			std::exit(2);
 		}
 	};
