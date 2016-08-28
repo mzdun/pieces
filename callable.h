@@ -31,8 +31,31 @@ namespace stdex {
 		static constexpr bool value = value_args && value_return;
 	};
 
+	template<typename... B>
+	struct or_;
+
+	template<>
+	struct or_<> : std::false_type {
+	};
+
+	template<typename B>
+	struct or_<B> : B {
+	};
+
+	template <bool Value, typename Head, typename... Tail>
+	struct select_or_ : Head {
+	};
+
+	template <typename Head, typename... Tail>
+	struct select_or_<false, Head, Tail...> : or_<Tail...> {
+	};
+
+	template<typename Head, typename... Tail>
+	struct or_<Head, Tail...> : select_or_<Head::value, Head, Tail...> {
+	};
+
 	template <typename Callable, typename... Prototypes>
-	struct is_callable_or : std::disjunction<is_callable<Prototypes, Callable>...> {
+	struct is_callable_or : or_<is_callable<Prototypes, Callable>...> {
 	};
 }
 
